@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mini Burger House — Order</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>
+    :root {
+      --primary: #0088cc; /* Telegram brand color */
+      --bg: #f9f9f9;
+      --card-bg: #fff;
+      --radius: 14px;
+      --shadow: 0 4px 8px rgba(0,0,0,0.08);
+    }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header {
+      background: var(--primary);
+      color: white;
+      padding: 16px;
+      text-align: center;
+      font-size: 1.4rem;
+      font-weight: 600;
+    }
+    main {
+      flex: 1;
+      padding: 16px;
+    }
+    .burger {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      overflow: hidden;
+    }
+    .burger img {
+      width: 100%;
+      max-width: 120px;
+      object-fit: cover;
+    }
+    .burger-content {
+      flex: 1;
+      padding: 12px;
+    }
+    .burger-content h4 {
+      margin: 0 0 4px;
+      font-size: 1.1rem;
+    }
+    .muted {
+      color: #666;
+      font-size: .9rem;
+    }
+    .row {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    input[type=number] {
+      width: 70px;
+      padding: 6px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    .btn {
+      background: var(--primary);
+      border: none;
+      padding: 12px;
+      width: 100%;
+      border-radius: var(--radius);
+      color: white;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .btn:hover { background: #007ab8; }
+    label { display: block; margin-top: 10px; }
+    input[type=text], textarea {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+    footer {
+      background: #eee;
+      padding: 10px;
+      text-align: center;
+      font-size: .85rem;
+      color: #444;
+      border-top: 1px solid #ddd;
+    }
+    @media (max-width: 600px) {
+      .burger {
+        flex-direction: column;
+        text-align: center;
+      }
+      .burger img {
+        max-width: 100%;
+        border-bottom: 1px solid #ddd;
+      }
+      .burger-content { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>🍔 Mini Burger House</header>
+  <main>
+    <div id="user-info" class="muted"></div>
+    <h3>Menu</h3>
+    <div id="burger-list">Loading burgers…</div>
+
+    <h3>Your Details</h3>
+    <label>Full name<br/><input id="full_name" type="text" /></label>
+    <label>Phone number<br/><input id="phone" type="text" /></label>
+    <label>Notes (optional)<br/><textarea id="notes"></textarea></label>
+
+    <div style="margin-top:16px">
+      <button id="placeOrder" class="btn">Place Order</button>
+      <p id="status" class="muted"></p>
+    </div>
+  </main>
+
+  <footer>
+    Developed by <strong>Nahom Keneni</strong>
+  </footer>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  if (tg) tg.expand();
+  let burgers = [];
+
+  async function fetchBurgers() {
+    const res = await fetch('/api/burgers/');
+    burgers = await res.json();
+    renderBurgers();
+  }
+
+  function renderBurgers(){
+    const c = document.getElementById('burger-list');
+    c.innerHTML = '';
+    burgers.forEach(b => {
+      const el = document.createElement('div');
+      el.className = 'burger';
+      el.innerHTML = `
+        <img src="${b.image || '/static/default-burger.png'}" />
+        <div class="burger-content">
+          <h4>${b.name}</h4>
+          <div class="muted">${b.description||''}</div>
+          <div class="muted">💵 ${b.price} | ⏱ ${b.prep_time_estimate} min</div>
+          <div class="row">
+            <label>Qty <input type="number" data-id="${b.id}" value="0" min="0"/></label>
+            <label><input type="checkbox" data-special="${b.id}" /> Special</label>
+          </div>
+        </div>
+      `;
+      c.appendChild(el);
+    });
+  }
+
+  async function placeOrder() {
+    const items = [];
+    document.querySelectorAll('input[type=number]').forEach(inp=>{
+      const qty = parseInt(inp.value||0);
+      if (qty > 0) {
+        const id = parseInt(inp.dataset.id);
+        const special = !!document.querySelector(`input[data-special="${id}"]`)?.checked;
+        items.push({burger:id, quantity: qty, special});
+      }
+    });
+    if (items.length === 0) return alert('Choose at least one burger');
+
+    const payload = {
+      full_name: document.getElementById('full_name').value || (tg?.initDataUnsafe?.user?.first_name || ''),
+      phone: document.getElementById('phone').value || '',
+      notes: document.getElementById('notes').value || '',
+      items,
+      telegram_user_id: tg?.initDataUnsafe?.user?.id || null
+    };
+    document.getElementById('status').innerText = 'Sending order…';
+    try {
+      const r = await fetch('/api/orders/create/', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        document.getElementById('status').innerText = 'Error: ' + err;
+        return;
+      }
+      const data = await r.json();
+      document.getElementById('status').innerText = 
+        `✅ Order #${data.id} received. ETA: ${new Date(data.estimated_ready_at).toLocaleTimeString()}`;
+      if (tg) tg.sendData(JSON.stringify({order_id:data.id,status:'created'}));
+    } catch (e) {
+      document.getElementById('status').innerText = 'Network error';
+    }
+  }
+
+  document.getElementById('placeOrder').addEventListener('click', placeOrder);
+
+  if (tg?.initDataUnsafe?.user) {
+    const u = tg.initDataUnsafe.user;
+    document.getElementById('user-info').innerText =
+      `👋 Hello, ${u.first_name}${u.last_name ? ' ' + u.last_name : ''}`;
+    if (!document.getElementById('full_name').value) {
+      document.getElementById('full_name').value =
+        (u.first_name || '') + (u.last_name ? ' ' + u.last_name : '');
+    }
+  }
+  fetchBurgers();
+</script>
+</body>
+</html>
